@@ -31,7 +31,7 @@ func testResponse(status int, body string) *http.Response {
 
 func TestSystemOneDo(t *testing.T) {
 	calls := 0
-	client := typesafeai.NewSystemOneClient("test-key", &http.Client{
+	client := typesafeai.NewSystemOneClient(typesafeai.WithAPIKey("test-key"), typesafeai.WithHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			calls++
 			if req.Method != http.MethodPost {
@@ -72,7 +72,7 @@ func TestSystemOneDo(t *testing.T) {
 				"usage":{"input_tokens":123,"output_tokens":45}
 			}`), nil
 		}),
-	})
+	}))
 
 	got, err := client.Do(t.Context(), &typesafeai.SystemOneRequest{
 		State: map[string]string{"text": "sample"},
@@ -117,13 +117,13 @@ func TestSystemOneDo(t *testing.T) {
 func TestSystemOneDoAPIError(t *testing.T) {
 	for _, status := range []int{199, 300, 400, 401, 429, 500} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			client := typesafeai.NewSystemOneClient("test-key", &http.Client{
+			client := typesafeai.NewSystemOneClient(typesafeai.WithAPIKey("test-key"), typesafeai.WithHTTPClient(&http.Client{
 				Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 					resp := testResponse(status, "not JSON")
 					resp.Header.Set("x-typesafe-request-id", "req-123")
 					return resp, nil
 				}),
-			})
+			}))
 
 			got, err := client.Do(t.Context(), &typesafeai.SystemOneRequest{})
 
@@ -149,11 +149,11 @@ func TestSystemOneDoAPIError(t *testing.T) {
 
 func TestSystemOneDoConnectionError(t *testing.T) {
 	wantErr := errors.New("connection failed")
-	client := typesafeai.NewSystemOneClient("test-key", &http.Client{
+	client := typesafeai.NewSystemOneClient(typesafeai.WithAPIKey("test-key"), typesafeai.WithHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, wantErr
 		}),
-	})
+	}))
 	got, err := client.Do(t.Context(), &typesafeai.SystemOneRequest{})
 	if _, ok := errors.AsType[*typesafeai.ConnectionError](err); !ok {
 		t.Fatalf("error = %v, want ConnectionError", err)
@@ -163,5 +163,92 @@ func TestSystemOneDoConnectionError(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("response = %#v, want nil", got)
+	}
+}
+
+func TestSystemOneDoEndpoint(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []typesafeai.Option
+		want string
+	}{
+		{name: "default", want: "https://api.typesafe.ai/v1/systemone"},
+		{
+			name: "host only",
+			opts: []typesafeai.Option{typesafeai.WithBaseURL("http://localhost:8080")},
+			want: "http://localhost:8080/v1/systemone",
+		},
+		{
+			name: "trailing slash",
+			opts: []typesafeai.Option{typesafeai.WithBaseURL("http://localhost:8080/")},
+			want: "http://localhost:8080/v1/systemone",
+		},
+		{
+			name: "path prefix",
+			opts: []typesafeai.Option{typesafeai.WithBaseURL("https://proxy.example/typesafe")},
+			want: "https://proxy.example/typesafe/v1/systemone",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			opts := append(tt.opts, typesafeai.WithHTTPClient(&http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					got = req.URL.String()
+					return testResponse(http.StatusOK, `{"model":"m","answers":{},"usage":{}}`), nil
+				}),
+			}))
+			if _, err := typesafeai.NewSystemOneClient(opts...).Do(t.Context(), &typesafeai.SystemOneRequest{}); err != nil {
+				t.Fatalf("Do() error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("URL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSystemOneDoWithoutAPIKey(t *testing.T) {
+	client := typesafeai.NewSystemOneClient(typesafeai.WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if got, ok := req.Header["Authorization"]; ok {
+				t.Errorf("Authorization = %q, want no header", got)
+			}
+			return testResponse(http.StatusOK, `{"model":"m","answers":{},"usage":{}}`), nil
+		}),
+	}))
+	if _, err := client.Do(t.Context(), &typesafeai.SystemOneRequest{}); err != nil {
+		t.Fatalf("Do() error: %v", err)
+	}
+}
+
+func TestSystemOneDoInvalidBaseURL(t *testing.T) {
+	for _, baseURL := range []string{"", "localhost:8080", "ftp://example.com", "://bad", "http://"} {
+		t.Run(baseURL, func(t *testing.T) {
+			calls := 0
+			client := typesafeai.NewSystemOneClient(
+				typesafeai.WithBaseURL(baseURL),
+				typesafeai.WithHTTPClient(&http.Client{
+					Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+						calls++
+						return testResponse(http.StatusOK, `{}`), nil
+					}),
+				}),
+			)
+			got, err := client.Do(t.Context(), &typesafeai.SystemOneRequest{})
+			vErr, ok := errors.AsType[*typesafeai.ValidationError](err)
+			if !ok {
+				t.Fatalf("error = %v, want ValidationError", err)
+			}
+			if vErr.Field != "baseURL" {
+				t.Errorf("Field = %q, want baseURL", vErr.Field)
+			}
+			if calls != 0 {
+				t.Errorf("HTTP calls = %d, want 0", calls)
+			}
+			if got != nil {
+				t.Errorf("response = %#v, want nil", got)
+			}
+		})
 	}
 }

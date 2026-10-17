@@ -21,18 +21,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 
 	"github.com/chez-shanpu/typesafeai-go"
 )
 
 func main() {
-	apiKey := os.Getenv("TYPESAFE_API_KEY")
-	if apiKey == "" {
-		log.Fatal("TYPESAFE_API_KEY is not set")
-	}
-
 	trueDesc := "the number is divisible by 2 (even)"
 	falseDesc := "the number is not divisible by 2 (odd)"
 
@@ -47,7 +41,11 @@ func main() {
 		},
 	}
 
-	client := typesafeai.NewSystemOneClient(apiKey, http.DefaultClient)
+	opts := []typesafeai.Option{typesafeai.WithAPIKey(os.Getenv("TYPESAFE_API_KEY"))}
+	if baseURL := os.Getenv("TYPESAFE_BASE_URL"); baseURL != "" {
+		opts = append(opts, typesafeai.WithBaseURL(baseURL))
+	}
+	client := typesafeai.NewSystemOneClient(opts...)
 
 	resp, err := client.Do(context.Background(), &typesafeai.SystemOneRequest{
 		State:     42,
@@ -70,6 +68,21 @@ func main() {
 
 	fmt.Printf("noul=%.4f\n", noul.Noul)
 }
+```
+
+## Configuration
+
+`NewSystemOneClient` accepts options:
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `WithAPIKey(key)` | Sent as `Authorization: Bearer <key>`. Omitted when empty. | none |
+| `WithBaseURL(url)` | Base URL of any TypeSafe AI compatible API. `/v1/systemone` is appended. | `https://api.typesafe.ai` |
+| `WithHTTPClient(c)` | HTTP client used to send requests. | `http.DefaultClient` |
+
+```go
+// A TypeSafe AI compatible server running locally without authentication.
+client := typesafeai.NewSystemOneClient(typesafeai.WithBaseURL("http://localhost:8080"))
 ```
 
 See [`examples/noul.go`](./examples/noul.go) for a more detailed example.

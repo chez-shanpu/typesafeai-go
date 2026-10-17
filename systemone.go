@@ -10,10 +10,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
-// SystemOneV1URL is the System One v1 API endpoint.
-const SystemOneV1URL = "https://api.typesafe.ai/v1/systemone"
+// DefaultBaseURL is the base URL of the official TypeSafe AI API.
+const DefaultBaseURL = "https://api.typesafe.ai"
 
 // Question type discriminators used in the "type" JSON field.
 const (
@@ -45,34 +46,63 @@ type TokenUsage struct {
 // SystemOneClient calls the System One API.
 type SystemOneClient struct {
 	apiKey     string
+	baseURL    string
 	httpClient *http.Client
 }
 
-// NewSystemOneClient returns a SystemOneClient that authenticates with
-// apiKey and issues requests via client.
-func NewSystemOneClient(apiKey string, client *http.Client) *SystemOneClient {
-	return &SystemOneClient{
-		apiKey:     apiKey,
-		httpClient: client,
+// NewSystemOneClient returns a SystemOneClient configured by opts.
+// Without options, it sends unauthenticated requests to DefaultBaseURL
+// via http.DefaultClient.
+func NewSystemOneClient(opts ...Option) *SystemOneClient {
+	c := &SystemOneClient{
+		baseURL:    DefaultBaseURL,
+		httpClient: http.DefaultClient,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// endpoint returns the System One v1 endpoint under the configured base URL.
+func (c *SystemOneClient) endpoint() (string, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", &ValidationError{Field: "baseURL", Message: err.Error()}
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", &ValidationError{
+			Field:   "baseURL",
+			Message: fmt.Sprintf("must be an absolute http(s) URL, got %q", c.baseURL),
+		}
+	}
+	return u.JoinPath("v1", "systemone").String(), nil
 }
 
 // Do sends req to the System One API and returns the decoded response.
-// It returns a *ConnectionError on network failure, an *APIError for
-// non-2xx responses, or a *ResponseValidationError if the response body
-// cannot be decoded.
+// It returns a *ValidationError if the base URL is invalid, a
+// *ConnectionError on network failure, an *APIError for
+// non-2xx responses, or the error from encoding/json if the response
+// body cannot be decoded.
 func (c *SystemOneClient) Do(ctx context.Context, req *SystemOneRequest) (sresp *SystemOneResponse, err error) {
+	endpoint, err := c.endpoint()
+	if err != nil {
+		return nil, err
+	}
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, SystemOneV1URL, bytes.NewReader(body))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	r.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.apiKey != "" {
+		r.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	r.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(r)

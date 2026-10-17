@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 
@@ -21,11 +20,6 @@ func main() {
 	n, err := strconv.Atoi(os.Args[1])
 	if err != nil {
 		log.Fatalf("invalid number %q: %v", os.Args[1], err)
-	}
-
-	apiKey := os.Getenv("TYPESAFE_API_KEY")
-	if apiKey == "" {
-		log.Fatal("TYPESAFE_API_KEY is not set")
 	}
 
 	trueDesc := "the number is divisible by 2 (even)"
@@ -42,7 +36,11 @@ func main() {
 		},
 	}
 
-	client := typesafeai.NewSystemOneClient(apiKey, http.DefaultClient)
+	opts := []typesafeai.Option{typesafeai.WithAPIKey(os.Getenv("TYPESAFE_API_KEY"))}
+	if baseURL := os.Getenv("TYPESAFE_BASE_URL"); baseURL != "" {
+		opts = append(opts, typesafeai.WithBaseURL(baseURL))
+	}
+	client := typesafeai.NewSystemOneClient(opts...)
 
 	resp, err := client.Do(context.Background(), &typesafeai.SystemOneRequest{
 		State:     strconv.Itoa(n),
