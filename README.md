@@ -86,3 +86,8 @@ client := typesafeai.NewSystemOneClient(typesafeai.WithBaseURL("http://localhost
 ```
 
 See [`examples/noul.go`](./examples/noul.go) for a more detailed example.
+
+## Releasing
+
+Run the [Release](./.github/workflows/release.yaml) workflow from the Actions tab on `main` and enter the version (e.g. `v0.3.0`).
+It runs `make verify`, then creates the tag and a GitHub Release with generated notes. Versions with a suffix such as `v0.3.0-rc.1` are marked as pre-releases.
