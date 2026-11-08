@@ -16,11 +16,12 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: release
+    # Tags are created with a GitHub App token, not GITHUB_TOKEN, because
+    # the v* tag ruleset can only be bypassed by the release App.
     permissions:
-      contents: write
+      contents: read
     env:
       VERSION: ${{ inputs.version }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Validate version
         run: |
@@ -49,7 +50,17 @@ jobs:
       - name: Run tests
         run: make verify
 
+      - name: Generate release App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes)
           if [[ "$VERSION" == *-* ]]; then
